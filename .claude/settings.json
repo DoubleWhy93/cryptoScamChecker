@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "A file was just written or edited. Review the changed code for: bugs, incorrect logic, security issues, and obvious code quality problems. Be concise — only flag real issues, not style preferences. If the code looks correct, say 'ok'.",
+            "continueOnBlock": true,
+            "statusMessage": "Reviewing code..."
+          }
+        ]
+      }
+    ]
+  }
+}

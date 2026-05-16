@@ -158,11 +158,18 @@ def extract_features(address: str, check_counterparties: bool = False) -> dict:
     max_out  = max(tx_amounts_out, default=0) * SATOSHI
     spike_ratio = max_in / avg_in if avg_in > 0 else 1.0  # dominant single payment
 
-    # Burst detection: all activity within N days
+    # Burst detection: span between oldest and newest observed tx
     burst_days = None
     if len(timestamps) >= 2:
         span = (max(timestamps) - min(timestamps)) / 86400
         burst_days = round(span, 1)
+
+    # Recency: how long ago was the first / last tx in our sample
+    import time as _time
+    _now = _time.time()
+    # mempool returns txs newest-first; if tx_count <= 50 we have the full history
+    last_active_days_ago  = round((_now - max(timestamps)) / 86400, 1) if timestamps else None
+    first_seen_days_ago   = round((_now - min(timestamps)) / 86400, 1) if timestamps else None
 
     # Counterparty check against criminal DB
     counterparty_hits = []
@@ -172,22 +179,24 @@ def extract_features(address: str, check_counterparties: bool = False) -> dict:
         counterparty_hits = [a for a in all_counterparties if a in _CRIMINAL_SET]
 
     return {
-        "address":           address,
-        "tx_count":          tx_count,
-        "total_in_btc":      round(total_in_btc, 8),
-        "total_out_btc":     round(total_out_btc, 8),
-        "balance_btc":       round(balance * SATOSHI, 8),
-        "relay_ratio":       round(relay_ratio, 4),
-        "n_senders_seen":    n_senders,
-        "n_recipients_seen": n_recipients,
-        "funnel_ratio":      round(funnel_ratio, 2),
-        "max_recv_btc":      round(max_in, 8),
-        "avg_recv_btc":      round(avg_in, 8),
-        "spike_ratio":       round(spike_ratio, 2),
-        "burst_days":        burst_days,
-        "counterparty_hits": counterparty_hits,
-        "in_criminal_db":    address in _CRIMINAL_SET,
-        "txs_sampled":       len(txs),
+        "address":              address,
+        "tx_count":             tx_count,
+        "total_in_btc":         round(total_in_btc, 8),
+        "total_out_btc":        round(total_out_btc, 8),
+        "balance_btc":          round(balance * SATOSHI, 8),
+        "relay_ratio":          round(relay_ratio, 4),
+        "n_senders_seen":       n_senders,
+        "n_recipients_seen":    n_recipients,
+        "funnel_ratio":         round(funnel_ratio, 2),
+        "max_recv_btc":         round(max_in, 8),
+        "avg_recv_btc":         round(avg_in, 8),
+        "spike_ratio":          round(spike_ratio, 2),
+        "burst_days":           burst_days,
+        "last_active_days_ago": last_active_days_ago,
+        "first_seen_days_ago":  first_seen_days_ago,
+        "counterparty_hits":    counterparty_hits,
+        "in_criminal_db":       address in _CRIMINAL_SET,
+        "txs_sampled":          len(txs),
     }
 
 

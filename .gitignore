@@ -1,0 +1,6 @@
+.env
+output/
+data/btc/
+data/eth/
+__pycache__/
+*.pyc

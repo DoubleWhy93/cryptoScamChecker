@@ -7,32 +7,47 @@ plain-language warning for the user. Runs after Layer 2 has flagged an address.
 
 ## How it works
 
-The agent is given an address and a transaction context. It has 3 tools it can
-call in any order, as many times as it needs (up to 8 calls total):
+Criminals always need to convert stolen crypto into real purchasing power. They route
+funds through 1-2 relay wallets and deposit into an exchange (Binance, OKX, etc.) to
+sell for fiat. The agent traces the full chain to find where the money ends up.
 
 ```
-get_address_summary(address)
-  → tx_count, balance_btc, relay_ratio, funnel_ratio,
-    spike_ratio, burst_days, total_in_btc, total_out_btc
-
-trace_recipients(address)
-  → top 5 addresses this wallet forwarded money to, with amounts
-
-score_recipient(address)
-  → risk_level, score, evidence for any address (1-hop deeper)
+Fresh scam wallet  →  [0-2 relay hops]  →  Exchange deposit address
+     ↑                                            ↑
+ Low tx_count                          Very high tx_count
+ Recently created                      Massive total_in_btc
+ Sweeps immediately                    Many unrelated senders
+                                       Near-zero balance (sweeps to cold storage)
 ```
 
-The model decides what to investigate. A typical run looks like:
+**STEP 1 — Assess the target address**
+  `get_address_summary(recipient)`
+  Is it fresh? (low tx_count, appeared recently, active in last 1-2 weeks)
+  Does it sweep immediately? (relay_ratio ≈ 1.0, near-zero balance)
+  → Fresh + sweeping = relay wallet, not the final destination
 
-```
-1. get_address_summary(recipient)          ← always starts here
-2. trace_recipients(recipient)             ← if relay_ratio > 0.9 or tx_count < 5
-3. score_recipient(top_recipient_addr)     ← if broker address looks suspicious
-4. Final JSON response
-```
+**STEP 2 — Follow the money hop by hop**
+  `get_outflows(address)` → find next hop
+  `get_address_summary(next_hop)` → classify it:
+  - Relay: relay_ratio ≈ 1.0, low balance, moderate tx_count
+  - Exchange: very high tx_count + total_in_btc, near-zero balance
+  Repeat up to 3 hops.
 
-All API calls go to mempool.space (free, no key). The model reasons over the
-results and outputs a structured warning.
+**STEP 3 — Confirm the exchange endpoint**
+  `get_inflows(suspected_exchange)`
+  If n_unique_senders is very high (hundreds+) → almost certainly an exchange.
+  Chain confirmed: fresh wallet → relay(s) → exchange = scam cashout route.
+
+The 4 tools available:
+
+| Tool | What it returns |
+|------|----------------|
+| `get_address_summary(address)` | tx_count, relay_ratio, balance, first_seen_days_ago, last_active_days_ago, burst_days |
+| `get_outflows(address)` | top 5 addresses this wallet sent money TO (downstream brokers) |
+| `get_inflows(address)` | who sent money TO this wallet + n_unique_senders (consolidation check) |
+| `score_address(address)` | risk_level, score 0-100, evidence list |
+
+All API calls go to mempool.space (free, no key needed).
 
 ---
 
@@ -45,10 +60,10 @@ pip install google-genai requests pandas
 Set your Google AI Studio API key:
 
 ```bash
-# Windows
+# Windows PowerShell
 $env:GOOGLE_API_KEY = "your-key-here"
 
-# Mac/Linux
+# Mac / Linux
 export GOOGLE_API_KEY="your-key-here"
 ```
 
@@ -77,19 +92,8 @@ result = investigate(
             "[+25] Funnel pattern: many senders to few recipients",
         ],
     },
-    verbose=True,   # prints each tool call and result
+    verbose=True,
 )
-```
-
-### Return value
-
-```python
-{
-    "risk_level":   "HIGH",          # HIGH | MEDIUM | LOW | CLEAN
-    "warning_text": "Before you confirm...",   # 2-3 sentence user-facing warning
-    "evidence":     ["finding 1", "finding 2"],
-    "suggestions":  ["Wait 24 hours", "Send a small test amount first"],
-}
 ```
 
 ### Minimal call (no layer2 context)
@@ -100,52 +104,59 @@ result = investigate(
     amount_usd=12000,
     token="BTC",
     account={"account_age_days": 30, "avg_tx_usd": 500},
-    layer2_result={},   # pass empty dict if called standalone
+    layer2_result={},
 )
+```
+
+### Return value
+
+```python
+{
+    "risk_level":   "HIGH",
+    "warning_text": "Before you confirm this transfer...",
+    "evidence":     [
+        "Recipient address first appeared 8 days ago",
+        "All funds are immediately forwarded to a single broker address",
+        "That broker is receiving from 34 different wallets simultaneously",
+    ],
+    "suggestions":  [
+        "Wait 24 hours before confirming",
+        "Send a small test amount first to verify the recipient",
+    ],
+}
 ```
 
 ---
 
 ## Model selection
 
-Default model is `gemma-3-27b-it`. Override via environment variable:
-
 ```bash
-# Fastest
-$env:GEMMA_MODEL = "gemma-3-4b-it"
-
-# Best tool-use reliability
-$env:GEMMA_MODEL = "gemini-2.0-flash"
+$env:GEMMA_MODEL = "gemma-3-4b-it"      # fastest
+$env:GEMMA_MODEL = "gemma-3-27b-it"     # default — good quality
+$env:GEMMA_MODEL = "gemini-2.0-flash"   # best tool-use reliability
 ```
-
-| Model | Speed | Tool-use quality |
-|-------|-------|-----------------|
-| `gemma-3-4b-it` | Fast | Good |
-| `gemma-3-27b-it` | Moderate | Better |
-| `gemini-2.0-flash` | Fast | Best |
 
 ---
 
 ## Verbose output
 
-With `verbose=True` you see every tool call the model makes:
-
 ```
 [layer3] Starting investigation  model=gemma-3-27b-it
 [layer3] Recipient: 1GH9bkaD3QsZyFU1MRcvpmQLj4SiVpARit
-[layer3] Amount: $15,000 BTC  (22.5x user avg)
+[layer3] Amount:    $15,000 BTC  (22.5x user avg)
 
-[layer3]   -> get_address_summary(1GH9bkaD3QsZyFU1...)
-[layer3]      {"tx_count": 2871, "relay_ratio": 1.0, "funnel_ratio": 5.3, ...}
+[layer3]   -> get_address_summary(1GH9bkaD3QsZyFU1MRcvpmQLj4...)
+[layer3]      {"tx_count": 4, "relay_ratio": 0.9998, "first_seen_days_ago": 8, ...}
 
-[layer3]   -> trace_recipients(1GH9bkaD3QsZyFU1...)
-[layer3]      {"top_recipients": [{"address": "bc1q...", "total_btc": 108.4}, ...]}
+[layer3]   -> get_outflows(1GH9bkaD3QsZyFU1MRcvpmQLj4...)
+[layer3]      {"top_recipients": [{"address": "bc1qr4dl5...", "total_btc": 0.182}]}
 
-[layer3]   -> score_recipient(bc1q...)
-[layer3]      {"risk_level": "HIGH", "score": 75, "evidence": [...]}
+[layer3]   -> get_inflows(bc1qr4dl5...)
+[layer3]      {"n_unique_senders": 34, "top_senders": [...]}
+
+[layer3]   -> score_address(bc1qr4dl5...)
+[layer3]      {"risk_level": "HIGH", "score": 85, "evidence": [...]}
 
 [layer3] Final response:
 {"risk_level": "HIGH", "warning_text": "Before you confirm...", ...}
 ```
-
-Set `verbose=False` for production use.

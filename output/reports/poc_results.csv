@@ -1,0 +1,2 @@
+address,true_label,risk_level,score,tx_count,relay_ratio,funnel_ratio,burst_days,balance_btc,evidence
+bc1qw320zaufzvkdrww77y2954csa4a2c8vu35m4ru,manual,MEDIUM,45,12,1.0,1.0,2.1,0.0,[++30] High relay ratio: 90%+ of received funds forwarded out | [++15] Short burst lifecycle: all activity within 14 days

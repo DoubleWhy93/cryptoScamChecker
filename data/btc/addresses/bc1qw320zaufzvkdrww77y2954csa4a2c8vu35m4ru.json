@@ -1,0 +1,17 @@
+{
+  "address": "bc1qw320zaufzvkdrww77y2954csa4a2c8vu35m4ru",
+  "chain_stats": {
+    "funded_txo_count": 11,
+    "funded_txo_sum": 276516686,
+    "spent_txo_count": 11,
+    "spent_txo_sum": 276516686,
+    "tx_count": 12
+  },
+  "mempool_stats": {
+    "funded_txo_count": 0,
+    "funded_txo_sum": 0,
+    "spent_txo_count": 0,
+    "spent_txo_sum": 0,
+    "tx_count": 0
+  }
+}

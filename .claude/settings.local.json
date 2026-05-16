@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($cb = Get-Content \"D:\\\\cryptoScamChecker\\\\data\\\\CB.tsv\" -TotalCount 3; $cb | ForEach-Object { $_.Substring\\(0, [Math]::Min\\(200, $_.Length\\)\\) }; Write-Host \"Total lines CB:\"; \\(Get-Content \"D:\\\\cryptoScamChecker\\\\data\\\\CB.tsv\"\\).Count)",
+      "PowerShell(New-Item *)"
+    ]
+  }
+}

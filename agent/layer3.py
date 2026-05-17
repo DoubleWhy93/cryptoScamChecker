@@ -22,15 +22,11 @@ Set GOOGLE_API_KEY and GEMMA_MODEL in .env at the project root.
 import json
 import os
 import re
-import sys
 import time
-from pathlib import Path
 
 import requests
 
-ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
-from score_address import extract_features, score
+from core.score import extract_features, score
 
 SATOSHI       = 1e-8
 SUN           = 1e-6
@@ -403,11 +399,11 @@ def _call_google(messages: list[dict], model: str, system_prompt: str) -> str:
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """You are a cryptocurrency fraud investigator. A user is about to send a large amount to an address. Trace where that money will ultimately end up.
+_SYSTEM_PROMPT = """You are a cryptocurrency fraud investigator. A user is about to send money to an address. Your job is to trace where that money will ultimately end up, then explain what you found.
 
-Criminals always need to convert stolen crypto into real purchasing power. They route funds through relay wallets and deposit into an exchange (Binance, OKX, Kraken etc.) to sell for fiat. Your goal is to follow the money chain hop by hop until you find the cashout point.
+Criminals convert stolen crypto into purchasing power by routing funds through intermediate wallets before depositing into an exchange (Binance, OKX, Kraken etc.) to sell for cash. Follow the money hop by hop until you reach that cashout point.
 
-You have 4 tools. Call them by responding with a tool call block:
+You have 4 tools. Call them by outputting a tool call block:
 
 <tool_call>
 {"name": "tool_name", "args": {"address": "..."}}
@@ -416,35 +412,50 @@ You have 4 tools. Call them by responding with a tool call block:
 Available tools:
 
 get_address_summary(address)
-  Returns: tx_count, balance, relay_ratio, n_senders_seen, n_recipients_seen,
-           first_seen_days_ago, last_active_days_ago, burst_days
-  Use this to classify any address. Very high tx_count + large total_in = likely exchange.
+  Returns: tx_count, balance, total_in, total_out, relay_ratio, n_senders_seen,
+           n_recipients_seen, first_seen_days_ago, last_active_days_ago, burst_days
+  Use to classify any address. Very high tx_count + large total_in = likely exchange.
 
 get_outflows(address)
-  Returns: top 5 addresses this wallet sent money TO with amounts
-  Use this to follow the money to the next hop.
+  Returns: top 5 addresses this wallet sent money TO, with amounts.
+  Follow these to find the next hop.
 
 get_inflows(address)
-  Returns: n_unique_senders + top senders to this wallet
-  Use this on suspected exchange endpoints — very high n_unique_senders confirms it is an exchange.
+  Returns: n_unique_senders and top senders.
+  Very high n_unique_senders on a large-volume wallet confirms it is an exchange deposit address.
 
 score_address(address)
-  Returns: risk_level (HIGH/MEDIUM/LOW/CLEAN), score 0-100, evidence list
+  Returns: risk_level (HIGH/MEDIUM/LOW/CLEAN), score 0-100, evidence list.
 
 Investigation strategy:
-  STEP 1 — Assess the target. Call get_address_summary. Is it fresh (low tx_count, appeared recently)? Does it sweep immediately (relay_ratio close to 1.0)?
-  STEP 2 — Follow the money. Call get_outflows to find the next hop. Then get_address_summary on that address to classify it.
-  STEP 3 — Keep following hops (up to 6) until you reach a high-volume address (tx_count in thousands, massive total_in) — that is the exchange cashout point.
-  STEP 4 — Confirm the exchange. Call get_inflows on it. Very high n_unique_senders = exchange confirmed.
+  1. get_address_summary on the recipient. Note the exact values: tx_count, first_seen_days_ago, relay_ratio.
+  2. If relay_ratio is high, call get_outflows and follow to the next address. Summarize on that address.
+  3. Keep following hops (up to 6) until you reach a high-volume address (tx_count in the thousands).
+  4. Call get_inflows on the suspected endpoint to check n_unique_senders.
 
-The chain: fresh wallet → relay(s) → exchange = strong evidence of a scam cashout route.
+When you are done investigating, output your final assessment as a JSON object.
+The JSON is for the application only; the user will not see raw JSON.
+Every customer-facing field must be warm, plain, and specific to THIS address.
+Use the exact numbers from the tool results: age in days, transaction counts, amounts, percentages, and unique sender counts.
+Do not shame the user. Acknowledge that scams often use hope, fear, urgency, romantic trust, or promises of profit to pressure people.
+Include a conditional warning about WhatsApp, Telegram, social media, secrecy, guaranteed returns, taxes/fees to unlock funds, and urgent deadlines.
+Do not claim the user used WhatsApp or Telegram unless it is conditional, for example: "If this request came through WhatsApp or Telegram..."
+Do not use crypto jargon in customer-facing fields. Forbidden words in headline, user_message, detailed_findings, scam_red_flags, and suggestions: relay, hop, chain, tx_count, relay_ratio, funnel, UTXO, on-chain, node.
 
-Once you have traced the chain, respond with your final assessment as a JSON object:
 {
   "risk_level": "HIGH" | "MEDIUM" | "LOW" | "CLEAN",
-  "user_message": "3-5 sentences written for someone with no crypto knowledge. Explain what you found using everyday words. Forbidden words: relay, hop, chain, tx_count, relay_ratio, funnel, UTXO, on-chain, node, wallet address. Instead say things like: 'this account was created just 8 days ago', 'the money was immediately moved to another account within hours', 'that account collects money from dozens of different people at the same time — a pattern commonly used by scammers to pool stolen funds before cashing out'. Be warm and specific about what you actually found.",
-  "evidence": ["Each bullet must describe a concrete finding in plain language. Bad: 'The money follows a chain: addr1 -> addr2'. Good: 'The recipient account was created 8 days ago and has only been used 4 times'. Good: 'Every dollar received was moved out within hours, leaving a zero balance'. Good: 'The next account this money flows to collects from 47 different people simultaneously'."],
-  "suggestions": ["concrete action 1", "concrete action 2"]
+  "headline": "A short, calm warning title for a normal customer.",
+  "user_message": "4-6 warm sentences. Explain what was found and why it matters. Use exact values from the investigation. Say that if someone is pushing urgency, secrecy, romance, guaranteed returns, or fear of missing out, that pressure is a red flag. Be firm but compassionate.",
+  "detailed_findings": [
+    "3-5 bullets. Each bullet must include a specific number from the tool results and explain it in everyday language."
+  ],
+  "scam_red_flags": [
+    "2-4 bullets. Include conditional advice such as: If this request came through WhatsApp, Telegram, a dating app, social media, or someone asking you to keep it secret, pause now."
+  ],
+  "suggestions": [
+    "3-5 concrete next steps. Include: do not send yet, verify through a trusted channel, talk to a trusted person, contact the platform/bank/exchange support, and do not pay extra taxes or unlock fees."
+  ],
+  "reassurance": "One compassionate sentence: scams are designed to create pressure; pausing is the safest move."
 }"""
 
 
@@ -460,35 +471,77 @@ def _parse_tool_call(text: str) -> dict | None:
         return None
 
 
+def _extract_json_object(text: str) -> dict | None:
+    """
+    Extract the first JSON object from a model response.
+    Handles both raw JSON and fenced Markdown blocks like ```json ... ```.
+    """
+    decoder = json.JSONDecoder()
+    candidates = [
+        match.group(1)
+        for match in re.finditer(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+    ]
+    candidates.append(text)
+
+    for candidate in candidates:
+        for match in re.finditer(r"\{", candidate):
+            try:
+                parsed, _ = decoder.raw_decode(candidate[match.start():])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+    return None
+
+
+def _normalize_final_response(parsed: dict, layer2_result: dict) -> dict:
+    parsed.setdefault("risk_level", layer2_result.get("risk_level", "UNKNOWN"))
+    parsed.setdefault("headline", "Review this transfer carefully")
+    parsed.setdefault("detailed_findings", parsed.get("evidence") or layer2_result.get("evidence", []))
+    parsed.setdefault("evidence", parsed.get("detailed_findings") or layer2_result.get("evidence", []))
+    parsed.setdefault("scam_red_flags", [
+        "If this request came through WhatsApp, Telegram, a dating app, or someone asking you to keep it private, pause before sending.",
+        "Promises of guaranteed profit, urgent deadlines, taxes, or unlock fees are common scam warning signs.",
+    ])
+    parsed.setdefault("suggestions", [
+        "Wait 24 hours before confirming",
+        "Verify the recipient through a trusted channel",
+        "Talk to someone you trust before sending",
+    ])
+    parsed.setdefault(
+        "reassurance",
+        "Scams are designed to create pressure; pausing now is a protective step.",
+    )
+
+    for key in ("detailed_findings", "evidence", "scam_red_flags", "suggestions"):
+        if not isinstance(parsed.get(key), list):
+            parsed[key] = [str(parsed[key])]
+
+    fallback_message = (
+        "This address shows unusual patterns. Verify the recipient before confirming."
+    )
+    parsed.setdefault("user_message", parsed.get("warning_text") or fallback_message)
+    parsed.setdefault("warning_text", parsed["user_message"])
+    return parsed
+
+
 def _parse_final_response(text: str, layer2_result: dict) -> dict:
-    start = text.rfind('{"risk_level"')
-    end   = text.rfind("}") + 1
-    if start != -1 and end > start:
-        try:
-            parsed = json.loads(text[start:end])
-            parsed.setdefault("risk_level",   layer2_result.get("risk_level", "UNKNOWN"))
-            parsed.setdefault("evidence",     layer2_result.get("evidence", []))
-            parsed.setdefault("warning_text",
-                "This address shows unusual patterns. Verify the recipient before confirming.")
-            parsed.setdefault("user_message",
-                "We noticed some unusual activity linked to this account. "
-                "We recommend verifying who you are sending money to before confirming.")
-            parsed.setdefault("suggestions", [
-                "Wait 24 hours before confirming",
-                "Send a small test amount first to verify the recipient",
-            ])
-            return parsed
-        except json.JSONDecodeError:
-            pass
-    return {
+    parsed = _extract_json_object(text)
+    if parsed is not None:
+        return _normalize_final_response(parsed, layer2_result)
+
+    return _normalize_final_response({
         "risk_level":   layer2_result.get("risk_level", "UNKNOWN"),
+        "headline":     "Review this transfer carefully",
+        "user_message": text.strip() or "Unusual on-chain patterns detected. Please verify before confirming.",
         "warning_text": text.strip() or "Unusual on-chain patterns detected. Please verify before confirming.",
-        "evidence":     layer2_result.get("evidence", []),
+        "detailed_findings": layer2_result.get("evidence", []),
         "suggestions":  [
             "Wait 24 hours before confirming",
-            "Send a small test amount first to verify the recipient",
+            "Verify the recipient through a trusted channel",
+            "Talk to someone you trust before sending",
         ],
-    }
+    }, layer2_result)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -501,6 +554,7 @@ def investigate(
     layer2_result: dict,
     chain: str | None = None,
     verbose: bool = True,
+    stage_callback=None,
 ) -> dict:
     """
     Run the Gemma 4 investigation agent on a flagged address.
@@ -575,6 +629,8 @@ def investigate(
         if tool_call:
             name   = tool_call.get("name", "")
             args   = tool_call.get("args", {})
+            if stage_callback:
+                stage_callback(name)
             result = tools_map[name](**args) if name in tools_map else {"error": f"unknown tool: {name}"}
             messages.append({
                 "role":    "user",

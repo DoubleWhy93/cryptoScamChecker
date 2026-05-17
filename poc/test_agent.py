@@ -1,10 +1,10 @@
 """
 Quick test script for the Layer 3 investigation agent.
-Paste in any Bitcoin address and see the full chain trace.
+Paste in any Bitcoin or TRX address and see the full trace.
 
-Usage:
-    python agent/test_layer3.py 1GH9bkaD3QsZyFU1MRcvpmQLj4SiVpARit
-    python agent/test_layer3.py 1GH9bka... --amount 25000
+Run from the project root:
+    python poc/test_agent.py 1GH9bkaD3QsZyFU1MRcvpmQLj4SiVpARit
+    python poc/test_agent.py TApEYDGz8eH9JywtaTWkTwczwPJH368aD3 --amount 25000
 """
 
 import argparse
@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-# Load .env from project root if present
+# Load .env from project root
 _env_file = Path(__file__).parent.parent / ".env"
 if _env_file.exists():
     for _line in _env_file.read_text().splitlines():
@@ -21,10 +21,7 @@ if _env_file.exists():
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip())
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-sys.path.insert(0, str(Path(__file__).parent))
-
-from layer3 import investigate, detect_chain
+from agent.layer3 import investigate, detect_chain
 
 
 def main():
@@ -56,8 +53,8 @@ def main():
 
     # Generic test account context
     account = {
-        "account_age_days": 34,
-        "avg_tx_usd": 500,
+        "account_age_days": 1000,
+        "avg_tx_usd": 15000,
     }
 
     # Minimal layer2 result — the agent will do its own full investigation

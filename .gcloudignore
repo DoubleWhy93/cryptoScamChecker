@@ -1,0 +1,12 @@
+.git
+.gitignore
+.claude
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+data/
+output/
+poc/
+HACKATHON_PLAN.md

@@ -31,7 +31,7 @@
           <div>
             <p class="eyebrow">Personal account</p>
             <h1 id="page-title">Send crypto</h1>
-            <p class="lede">Review and authorize an external transfer from your SwiftX account.</p>
+            <p class="lede">SwiftX keeps normal transfers fast, and adds a caring safety check when a payment looks unusual.</p>
           </div>
           <div class="portfolio-value">
             <span>Total balance</span>
@@ -45,13 +45,13 @@
               <p class="panel-kicker">External transfer</p>
               <h2 id="transfer-title">Recipient details</h2>
             </div>
-            <span class="chain-chip" id="chain-chip">BTC / TRX</span>
+            <span class="chain-chip" id="chain-chip">BTC / TRON</span>
           </div>
 
           <form class="send-form" id="send-form">
             <label class="field">
               <span>Recipient address</span>
-              <input id="address" type="text" placeholder="Paste BTC or TRX address" autocomplete="off" spellcheck="false" />
+              <input id="address" type="text" placeholder="Paste BTC, TRX, or USDT-TRC20 address" autocomplete="off" spellcheck="false" />
             </label>
 
             <div class="amount-row">
@@ -145,14 +145,18 @@
           <p class="panel-kicker">Demo recipients</p>
           <div class="presets" aria-label="Demo addresses">
             <button class="preset-btn" type="button" data-preset="0">
+              <span>Saved recipient</span>
+              <small>3LQUu4...FW6a - 250 BTC</small>
+            </button>
+            <button class="preset-btn" type="button" data-preset="1">
               <span>BTC risky wallet</span>
               <small>0.5 BTC</small>
             </button>
-            <button class="preset-btn" type="button" data-preset="1">
-              <span>TRX scam demo</span>
-              <small>TApEYDG...aD3 · 15,000 USDT</small>
-            </button>
             <button class="preset-btn" type="button" data-preset="2">
+              <span>TRX scam demo</span>
+              <small>TApEYDG...aD3 - 15,000 USDT</small>
+            </button>
+            <button class="preset-btn" type="button" data-preset="3">
               <span>TRX fund router</span>
               <small>5,000 TRX</small>
             </button>
@@ -164,6 +168,7 @@
           <ul class="compact-list">
             <li>Unusual address age or transfer history</li>
             <li>Rapid movement of received funds</li>
+            <li>USDT transfers on TRON/TRC20</li>
             <li>Patterns linked to scam cash-out behavior</li>
           </ul>
         </section>

@@ -1,7 +1,7 @@
 const riskMeta = {
   LOW: {
     cls: "low",
-    label: "SwiftX check passed",
+    label: "Ready to send",
     confirmText: "Release transfer",
     confirmCls: "",
   },
@@ -38,6 +38,7 @@ const riskMeta = {
 };
 
 const presets = [
+  { address: "3LQUu4v9z6KNch71j7kbj8GPeAGUo1FW6a", amount: "250", token: "BTC" },
   { address: "1GH9bkaD3QsZyFU1MRcvpmQLj4SiVpARit", amount: "0.5", token: "BTC" },
   { address: "TApEYDGz8eH9JywtaTWkTwczwPJH368aD3", amount: "15000", token: "USDT" },
   { address: "TDNxWTrZWXYBHpHkRH9qV6sbE1nx888888", amount: "5000", token: "TRX" },
@@ -67,15 +68,17 @@ function setText(id, text) {
 }
 
 function detectChainLabel(address) {
+  const token = $("token")?.value;
   if (address.startsWith("bc1") || address.startsWith("1") || address.startsWith("3")) return "BTC";
-  if (address.startsWith("T")) return "TRX";
+  if (address.startsWith("T")) return token === "USDT" ? "USDT-TRC20" : "TRX";
   if (address.startsWith("0x")) return "ETH";
-  return "BTC / TRX";
+  return "BTC / TRON";
 }
 
 function updateTokenMeta() {
   const token = $("token").value;
-  setText("network-fee", token === "BTC" ? "~0.0001 BTC" : "~3 TRX");
+  setText("network-fee", token === "BTC" ? "~0.0001 BTC" : "~3 TRX network fee");
+  setText("chain-chip", detectChainLabel($("address").value.trim()));
 }
 
 function resetResult() {
@@ -92,7 +95,7 @@ function resetResult() {
 function resetForm() {
   $("send-form").reset();
   document.querySelectorAll(".preset-btn").forEach((button) => button.classList.remove("active"));
-  setText("chain-chip", "BTC / TRX");
+  setText("chain-chip", "BTC / TRON");
   updateTokenMeta();
   resetResult();
 }
@@ -135,7 +138,7 @@ async function reviewTransfer(event) {
   const token = $("token").value;
 
   if (!address) {
-    showError("Enter a BTC or TRX recipient address before continuing.");
+    showError("Enter a BTC, TRX, or USDT-TRC20 recipient address before continuing.");
     return;
   }
 
@@ -163,7 +166,7 @@ async function reviewTransfer(event) {
     pendingJobId = data.job_id;
     pendingInvestigating = data.investigating;
     pendingQuick = data.quick;
-    showQuickResult(data.quick, data.investigating);
+    showQuickResult(data.quick, data.investigating, data.policy);
 
     if (data.investigating) {
       addActivityCard(data.job_id, address, amountInput, token, true, data.quick);
@@ -174,53 +177,56 @@ async function reviewTransfer(event) {
   }
 }
 
-function showQuickResult(quick, investigating) {
+function showQuickResult(quick, investigating, policy) {
   const level = quick.risk_level || "UNKNOWN";
   const meta = riskMeta[level] || riskMeta.UNKNOWN;
   const header = $("result-header");
   const score = Number.isFinite(quick.score) ? quick.score : "--";
 
-  header.className = `result-header ${meta.cls}`;
-  setText("risk-level-text", meta.label);
+  const visualClass = policy?.decision === "warn" && !investigating ? "medium" : meta.cls;
+  header.className = `result-header ${visualClass}`;
+  setText("risk-level-text", policy?.headline || meta.label);
   setText("score-badge", `${score}/100`);
 
   const facts = [];
   if (quick.tx_count != null) facts.push(`${quick.tx_count} transactions`);
   if (quick.first_seen_days_ago != null) facts.push(`first seen ${Math.round(quick.first_seen_days_ago)} days ago`);
   if (quick.balance) facts.push(`balance ${quick.balance}`);
+  if (quick.asset) facts.push(`asset ${quick.asset}`);
   setText(
     "user-message",
-    buildQuickMessage(level, investigating, facts)
+    policy?.message || buildQuickMessage(level, investigating, facts)
   );
 
-  renderList($("evidence-list"), quick.evidence || []);
-  setHidden($("evidence-title"), !investigating || !(quick.evidence || []).length);
+  const detailItems = policy?.details?.length ? policy.details : quick.evidence || [];
+  renderList($("evidence-list"), detailItems);
+  setHidden($("evidence-title"), !detailItems.length);
   setHidden($("deep-notice"), !investigating);
 
   const confirmButton = $("confirm-btn");
   confirmButton.textContent = meta.confirmText;
   confirmButton.className = `confirm-btn ${meta.confirmCls}`.trim();
-  confirmButton.disabled = investigating;
+  confirmButton.disabled = investigating || policy?.allow_release === false;
 
   setHidden($("result-panel"), false);
 }
 
 function buildQuickMessage(level, investigating, facts) {
-  const factText = facts.length ? ` SwiftX found: ${facts.join(", ")}.` : "";
+  const factText = facts.length ? ` Check details: ${facts.join(", ")}.` : "";
 
   if (investigating) {
-    return `This transfer is temporarily held while SwiftX completes enhanced review.${factText} You can cancel now, or wait for the safety report before deciding.`;
+    return `For your protection, SwiftX is holding this transfer for a deeper review before releasing funds.${factText} You can cancel now, or wait for the safety report before deciding.`;
   }
 
   if (level === "CLEAN" || level === "LOW") {
     return facts.length
-      ? `SwiftX completed the pre-release check and did not find a reason to hold this transfer.${factText}`
-      : "SwiftX completed the pre-release check and did not find a reason to hold this transfer.";
+      ? `SwiftX completed the check. We did not find a reason to slow down this transfer.${factText}`
+      : "SwiftX completed the check. We did not find a reason to slow down this transfer.";
   }
 
   return facts.length
-    ? `SwiftX could not fully clear this transfer.${factText}`
-    : "SwiftX could not fully clear this transfer.";
+    ? `SwiftX needs a little more time before this transfer can be released.${factText}`
+    : "SwiftX needs a little more time before this transfer can be released.";
 }
 
 function confirmTransfer() {

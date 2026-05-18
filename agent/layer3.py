@@ -6,6 +6,7 @@ Built for the Kaggle Gemma 4 for Good Hackathon.
 Supported chains:
   BTC  — mempool.space (no key needed)
   TRX  — Tronscan API (no key needed)
+  USDT — TRC20 transfers on TRON via Tronscan
   ETH  — planned (needs Etherscan key)
 
 Chain-specific code is limited to two fetcher functions per chain:
@@ -32,7 +33,16 @@ SATOSHI       = 1e-8
 SUN           = 1e-6
 MEMPOOL_BASE  = "https://mempool.space/api"
 TRONSCAN_BASE = "https://apilist.tronscan.org/api"
+TRONSCAN_API_BASE = "https://apilist.tronscanapi.com/api"
+TRON_USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
 DEFAULT_MODEL = "gemma-4-31b-it"
+
+
+def _asset_key(chain: str, token: str | None = None) -> str:
+    normalized = (token or "").strip().upper()
+    if chain == "trx" and normalized == "USDT":
+        return "usdt_trc20"
+    return chain
 
 
 # ── Chain detection ───────────────────────────────────────────────────────────
@@ -68,11 +78,12 @@ def _tronscan_headers() -> dict:
 
 # ── Chain-specific fetchers (the ONLY chain-specific code) ────────────────────
 
-def _fetch_account(address: str, chain: str) -> dict:
+def _fetch_account(address: str, chain: str, token: str | None = None) -> dict:
     """
     Returns {tx_count, balance, unit} for any chain.
-    balance is in human units (BTC or TRX), not satoshi/SUN.
+    balance is in human units (BTC, TRX, or USDT), not satoshi/SUN.
     """
+    asset = _asset_key(chain, token)
     if chain == "btc":
         data = _http_get(f"{MEMPOOL_BASE}/address/{address}")
         if not data:
@@ -86,7 +97,21 @@ def _fetch_account(address: str, chain: str) -> dict:
             "unit":     "BTC",
         }
 
-    if chain == "trx":
+    if asset == "usdt_trc20":
+        tx_data = _http_get(
+            f"{TRONSCAN_API_BASE}/transfer/trc20"
+            f"?address={address}&trc20Id={TRON_USDT_CONTRACT}&start=0&limit=50"
+            f"&direction=0&reverse=true&db_version=1",
+            _tronscan_headers(),
+        ) or {}
+        transfers = tx_data.get("data", []) if isinstance(tx_data, dict) else []
+        return {
+            "tx_count": tx_data.get("total", tx_data.get("rangeTotal", len(transfers))) if isinstance(tx_data, dict) else len(transfers),
+            "balance": None,
+            "unit":     "USDT",
+        }
+
+    if asset == "trx":
         data = _http_get(f"{TRONSCAN_BASE}/account?address={address}", _tronscan_headers())
         if not data or "address" not in data:
             return {"error": "not_found"}
@@ -99,12 +124,13 @@ def _fetch_account(address: str, chain: str) -> dict:
     return {"error": f"unsupported chain: {chain}"}
 
 
-def _fetch_txs(address: str, chain: str) -> list[dict]:
+def _fetch_txs(address: str, chain: str, token: str | None = None) -> list[dict]:
     """
     Returns normalized transactions: [{from, to, amount, timestamp}, ...]
-    amount is in human units (BTC or TRX).
+    amount is in human units (BTC, TRX, or USDT).
     timestamp is unix seconds.
     """
+    asset = _asset_key(chain, token)
     if chain == "btc":
         raw = _http_get(f"{MEMPOOL_BASE}/address/{address}/txs") or []
         txs = []
@@ -139,7 +165,27 @@ def _fetch_txs(address: str, chain: str) -> list[dict]:
                                     "timestamp": ts})
         return txs
 
-    if chain == "trx":
+    if asset == "usdt_trc20":
+        data = _http_get(
+            f"{TRONSCAN_API_BASE}/transfer/trc20"
+            f"?address={address}&trc20Id={TRON_USDT_CONTRACT}&start=0&limit=50"
+            f"&direction=0&reverse=true&db_version=1",
+            _tronscan_headers(),
+        )
+        raw = data.get("data", []) if isinstance(data, dict) else []
+        txs = []
+        for tx in raw:
+            decimals = int(tx.get("decimals") or tx.get("tokenInfo", {}).get("tokenDecimal") or 6)
+            raw_amount = float(tx.get("amount", 0) or 0)
+            amount = round(raw_amount / (10 ** decimals), 6)
+            frm = tx.get("from", "")
+            to = tx.get("to", "")
+            ts = (tx.get("block_timestamp") or tx.get("timestamp") or 0) / 1000
+            if frm and to and amount > 0:
+                txs.append({"from": frm, "to": to, "amount": amount, "timestamp": ts})
+        return txs
+
+    if asset == "trx":
         data = _http_get(
             f"{TRONSCAN_BASE}/transaction?address={address}&limit=50&sort=-timestamp",
             _tronscan_headers()
@@ -160,12 +206,12 @@ def _fetch_txs(address: str, chain: str) -> list[dict]:
 
 # ── Shared analysis — runs on normalized data for any chain ──────────────────
 
-def _get_address_summary(address: str, chain: str) -> dict:
-    account = _fetch_account(address, chain)
+def _get_address_summary(address: str, chain: str, token: str | None = None) -> dict:
+    account = _fetch_account(address, chain, token)
     if "error" in account:
         return account
 
-    txs  = _fetch_txs(address, chain)
+    txs  = _fetch_txs(address, chain, token)
     unit = account["unit"]
 
     total_in   = sum(t["amount"] for t in txs if t["to"]   == address)
@@ -183,8 +229,9 @@ def _get_address_summary(address: str, chain: str) -> dict:
 
     return {
         "chain":                chain.upper(),
+        "asset":                unit,
         "tx_count":             account["tx_count"],
-        "balance":              f"{account['balance']} {unit}",
+        "balance":              f"{account['balance']} {unit}" if account.get("balance") is not None else None,
         "total_in":             f"{round(total_in, 8)} {unit}",
         "total_out":            f"{round(total_out, 8)} {unit}",
         "relay_ratio":          round(relay_ratio, 4),
@@ -196,9 +243,9 @@ def _get_address_summary(address: str, chain: str) -> dict:
     }
 
 
-def _get_outflows(address: str, chain: str) -> dict:
-    txs = _fetch_txs(address, chain)
-    unit = _fetch_account(address, chain).get("unit", "")
+def _get_outflows(address: str, chain: str, token: str | None = None) -> dict:
+    txs = _fetch_txs(address, chain, token)
+    unit = _fetch_account(address, chain, token).get("unit", "")
 
     totals: dict[str, float] = {}
     for t in txs:
@@ -214,9 +261,9 @@ def _get_outflows(address: str, chain: str) -> dict:
     }
 
 
-def _get_inflows(address: str, chain: str) -> dict:
-    txs = _fetch_txs(address, chain)
-    unit = _fetch_account(address, chain).get("unit", "")
+def _get_inflows(address: str, chain: str, token: str | None = None) -> dict:
+    txs = _fetch_txs(address, chain, token)
+    unit = _fetch_account(address, chain, token).get("unit", "")
 
     totals: dict[str, float] = {}
     for t in txs:
@@ -233,7 +280,7 @@ def _get_inflows(address: str, chain: str) -> dict:
     }
 
 
-def _score_address(address: str, chain: str) -> dict:
+def _score_address(address: str, chain: str, token: str | None = None) -> dict:
     # BTC uses the full rule-based scorer from score_address.py
     if chain == "btc":
         features = extract_features(address, check_counterparties=False)
@@ -250,7 +297,7 @@ def _score_address(address: str, chain: str) -> dict:
         }
 
     # Other chains use the shared summary + same rule logic
-    s = _get_address_summary(address, chain)
+    s = _get_address_summary(address, chain, token)
     if "error" in s:
         return s
 
@@ -275,6 +322,7 @@ def _score_address(address: str, chain: str) -> dict:
 
     return {
         "chain":       s["chain"],
+        "asset":       s.get("asset"),
         "risk_level":  level,
         "score":       points,
         "evidence":    evidence,
@@ -285,7 +333,7 @@ def _score_address(address: str, chain: str) -> dict:
 
 # ── Tool factory — closures bind chain and verbose ────────────────────────────
 
-def _make_tools(verbose: bool, chain: str) -> list:
+def _make_tools(verbose: bool, chain: str, token: str | None = None) -> list:
 
     def _log(name: str, address: str, result: dict):
         if verbose:
@@ -302,7 +350,7 @@ def _make_tools(verbose: bool, chain: str) -> list:
         Use on every address to classify it: fresh scam wallet, relay hop,
         or exchange endpoint (very high tx_count + large total_in).
         """
-        r = _get_address_summary(address, chain)
+        r = _get_address_summary(address, chain, token)
         _log("get_address_summary", address, r)
         return r
 
@@ -311,7 +359,7 @@ def _make_tools(verbose: bool, chain: str) -> list:
         Get the top 5 addresses this wallet sent money TO, with amounts.
         Use this to follow the money to the next hop in the chain.
         """
-        r = _get_outflows(address, chain)
+        r = _get_outflows(address, chain, token)
         _log("get_outflows", address, r)
         return r
 
@@ -321,7 +369,7 @@ def _make_tools(verbose: bool, chain: str) -> list:
         Very high n_unique_senders on a sweeping wallet confirms it is an exchange.
         Returns n_unique_senders and top_senders list.
         """
-        r = _get_inflows(address, chain)
+        r = _get_inflows(address, chain, token)
         _log("get_inflows", address, r)
         return r
 
@@ -330,7 +378,7 @@ def _make_tools(verbose: bool, chain: str) -> list:
         Run behavioral risk scoring on an address.
         Returns risk_level (HIGH/MEDIUM/LOW/CLEAN), score 0-100, evidence list.
         """
-        r = _score_address(address, chain)
+        r = _score_address(address, chain, token)
         _log("score_address", address, r)
         return r
 
@@ -412,9 +460,10 @@ You have 4 tools. Call them by outputting a tool call block:
 Available tools:
 
 get_address_summary(address)
-  Returns: tx_count, balance, total_in, total_out, relay_ratio, n_senders_seen,
+  Returns: chain, asset, tx_count, balance, total_in, total_out, relay_ratio, n_senders_seen,
            n_recipients_seen, first_seen_days_ago, last_active_days_ago, burst_days
-  Use to classify any address. Very high tx_count + large total_in = likely exchange.
+  Use to classify any address. For USDT transfers, amounts are USDT-TRC20 movements on TRON.
+  Very high tx_count + large total_in = likely exchange.
 
 get_outflows(address)
   Returns: top 5 addresses this wallet sent money TO, with amounts.
@@ -562,7 +611,7 @@ def investigate(
     Args:
         address:       recipient address (BTC or TRX)
         amount_usd:    transaction amount in USD
-        token:         "BTC" | "TRX" | "USDT" etc.
+        token:         "BTC" | "TRX" | "USDT"
         account:       {account_age_days, avg_tx_usd}
         layer2_result: {score, risk_level, evidence} from layer2
         chain:         "btc" | "trx" — auto-detected from address if None
@@ -603,7 +652,7 @@ def investigate(
         print(f"[layer3] Recipient: {address}")
         print(f"[layer3] Amount:    ${amount_usd:,.0f} {token}  ({multiplier:.1f}x user avg)")
 
-    tools     = _make_tools(verbose, chain)
+    tools     = _make_tools(verbose, chain, token)
     tools_map = {fn.__name__: fn for fn in tools}
 
     # Conversation history as plain dicts — provider-agnostic

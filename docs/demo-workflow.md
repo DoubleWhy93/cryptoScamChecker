@@ -23,16 +23,43 @@ understand in a live demo: it shows how the investigation could fit into an
 existing consumer crypto product without requiring the user to understand block
 explorers or transaction graphs.
 
+## Experience Target
+
+The platform should distinguish between two customer experiences:
+
+- Legitimate users should feel almost no warning. The exchange runs the check,
+  clears the transfer, and lets them continue with minimal friction.
+- Potential victims should receive a warm safety hold. The message should be
+  specific, compassionate, and practical: explain what looked unusual, mention
+  scam pressure patterns such as WhatsApp, Telegram, secrecy, urgency, romance,
+  guaranteed profit, taxes, or unlock fees, and suggest safer next steps.
+
+This is the reason the agent is triggered by exchange behavior instead of asking
+the user to run a separate scanner. The exchange is protecting customer trust
+inside the normal send flow.
+
 ## What The Backend Checks
 
 The quick screen looks at public address behavior:
 
 - whether the chain can be detected
+- whether the selected asset matches the address type
+- whether this customer has frequently sent to the same recipient before
 - how many transactions the address has
 - whether the address is new or short-lived
 - whether funds are quickly moved out
 - whether funds appear to collect from many senders and move to few recipients
 - whether the behavior score crosses a warning threshold
+
+The demo supports BTC, native TRX, and USDT on TRON/TRC20.
+
+Basic policy filters run before the agent:
+
+- frequent saved recipient + clean/low public risk: pass with light friction
+- brand-new/no-history recipient: warn and recommend verifying ownership or a small test amount
+- very fresh recipient: warn with address-age context
+- large first-time recipient: warn and ask the user to verify through a trusted channel
+- medium/high/unknown risk: start the deeper agent review in the background
 
 When the quick score is elevated, the Layer 3 agent investigates the address in
 more detail by calling tools for summaries, inflows, outflows, and risk scoring.

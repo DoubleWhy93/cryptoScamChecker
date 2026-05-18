@@ -16,7 +16,7 @@ investigate suspicious addresses in more detail.
 
 1. The user acts normally inside a mock exchange account and starts an external transfer.
 2. The frontend calls `POST /api/review` before the transfer is released.
-3. The backend detects the chain, currently BTC or TRX.
+3. The backend detects the chain, currently BTC, TRX, or USDT on TRON/TRC20.
 4. Layer 2 runs a quick behavioral risk score from public address activity.
 5. The exchange UI pauses or allows the transfer based on the quick result.
 6. Medium and higher risk addresses trigger the Layer 3 investigation agent.
@@ -25,6 +25,16 @@ investigate suspicious addresses in more detail.
 
 The goal is a user-friendly pipeline that can interrupt scam payments at the
 moment they are still preventable.
+
+## Product Principle
+
+SwiftX should feel like a good exchange product, not a police checkpoint. A
+legitimate customer making a normal transfer should see only light confirmation
+and minimal friction. A potential victim sending money to a risky destination
+should receive a warm, specific safety alert that explains what SwiftX found and
+why pausing is the safest next step. The exchange behavior is intentionally
+customer-protective: preserve speed for normal activity, add care when the
+pattern looks like a scam.
 
 ## Architecture
 
@@ -79,6 +89,12 @@ OPENROUTER_API_KEY=...
 OPENROUTER_MODEL=...
 TRONSCAN_API_KEY=...
 ```
+
+Supported demo assets:
+
+- `BTC` on Bitcoin addresses.
+- `TRX` on TRON addresses.
+- `USDT` as TRC20 USDT on TRON addresses.
 
 ## API
 

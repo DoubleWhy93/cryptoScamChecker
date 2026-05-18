@@ -8,6 +8,7 @@ Then open http://localhost:8000 in your browser.
 """
 
 import os
+import csv
 import threading
 import uuid
 from pathlib import Path
@@ -32,6 +33,7 @@ app = FastAPI(title="CryptoScamChecker Demo API")
 
 # job_id -> {status, stage, quick, result, error}
 _jobs: dict[str, dict] = {}
+_LABELED_ADDRESS_PATH = Path(__file__).parent / "data" / "testing_labeled_addresses_2026-05-17.csv"
 
 # Human-readable stage names for each tool call
 _STAGE_LABELS = {
@@ -74,7 +76,102 @@ def _normalize_token(token: str) -> str:
     return token.strip().upper()
 
 
+def _load_labeled_addresses() -> dict[tuple[str, str, str], dict]:
+    if not _LABELED_ADDRESS_PATH.exists():
+        return {}
+
+    with _LABELED_ADDRESS_PATH.open(newline="", encoding="utf-8") as handle:
+        rows = csv.DictReader(handle)
+        return {
+            (
+                (row.get("chain") or "").strip().upper(),
+                (row.get("asset") or "").strip().upper(),
+                (row.get("address") or "").strip(),
+            ): row
+            for row in rows
+            if row.get("address")
+        }
+
+
+_LABELED_ADDRESSES = _load_labeled_addresses()
+
+
+def _scam_database_match(address: str, chain: str, token: str) -> dict | None:
+    match = _LABELED_ADDRESSES.get((chain.upper(), token, address))
+    if not match:
+        return None
+    if match.get("label_type") != "negative_reported":
+        return None
+    return match
+
+
+def _layer1_database_quick(match: dict, token: str) -> dict:
+    evidence = [
+        f"Reported address match: {match.get('label', 'negative report')}",
+        f"Source: {match.get('source', 'local labeled-address database')}",
+    ]
+    notes = match.get("notes")
+    if notes:
+        evidence.append(notes)
+
+    return {
+        "risk_level": "HIGH",
+        "score": 90,
+        "evidence": evidence,
+        "asset": token,
+        "tx_count": None,
+        "first_seen_days_ago": None,
+        "balance": None,
+        "database_match": {
+            "label_type": match.get("label_type"),
+            "label": match.get("label"),
+            "source": match.get("source"),
+            "date_or_seen": match.get("date_or_seen"),
+        },
+    }
+
+
+def _scam_database_policy(match: dict) -> dict:
+    label = match.get("label", "reported scam address")
+    return {
+        "decision": "review",
+        "reason": "scam_database_match",
+        "headline": "High alert: reported scam address",
+        "message": (
+            "We have received a report that this target address is connected to a scam. "
+            "SwiftX is holding this transfer before release. If someone on Telegram, WhatsApp, "
+            "a dating app, or an investment group told you to send this payment, stop and verify "
+            "through a trusted source before doing anything else."
+        ),
+        "details": [
+            f"Reported match: {label}",
+            f"Source: {match.get('source', 'local labeled-address database')}",
+            "This report is treated as a high-priority safety signal, not a final legal finding.",
+        ],
+        "allow_release": False,
+        "needs_agent": True,
+    }
+
+
 def _layer2(address: str, chain: str, token: str) -> dict:
+    if chain != "btc":
+        result = _score_address(address, chain, token)
+        if "error" in result:
+            return {
+                "risk_level": "UNKNOWN",
+                "score": 0,
+                "evidence": [f"Could not fetch address data: {result['error']}"],
+            }
+        return {
+            "risk_level": result.get("risk_level", "UNKNOWN"),
+            "score":      result.get("score", 0),
+            "evidence":   result.get("evidence", []),
+            "asset":      result.get("asset"),
+            "tx_count":   result.get("tx_count"),
+            "first_seen_days_ago": result.get("first_seen_days_ago"),
+            "balance":    result.get("balance"),
+        }
+
     summary = _get_address_summary(address, chain, token)
     if "error" in summary:
         return {
@@ -155,24 +252,43 @@ def _policy_check(address: str, chain: str, token: str, amount_usd: float, quick
                 f"Observed transactions: {tx_count}",
             ] + evidence[:2],
             "allow_release": True,
-            "needs_agent": quick.get("risk_level") in ("MEDIUM", "HIGH", "CRITICAL", "UNKNOWN"),
+            "needs_agent": False,
         }
 
     if amount_usd >= 10000 and not history:
+        needs_agent = quick.get("risk_level") in ("MEDIUM", "HIGH", "CRITICAL", "UNKNOWN")
         return {
             "decision": "warn",
             "reason": "large_first_time_recipient",
-            "headline": "Large transfer to a new recipient",
+            "headline": "Safety review in progress" if needs_agent else "Large transfer to a new recipient",
             "message": (
+                "This is a large transfer to a recipient that is not in your saved history. "
+                "SwiftX is temporarily holding it while we complete a safety review."
+                if needs_agent else
                 "This is a large transfer to a recipient that is not in your saved history. "
                 "Please verify the address through a trusted channel before releasing funds."
             ),
             "details": [
                 f"Transfer amount: ${amount_usd:,.0f}",
                 "No prior SwiftX sends to this recipient were found.",
-            ],
-            "allow_release": True,
-            "needs_agent": quick.get("risk_level") in ("MEDIUM", "HIGH", "CRITICAL", "UNKNOWN"),
+            ] + evidence[:2],
+            "allow_release": not needs_agent,
+            "needs_agent": needs_agent,
+        }
+
+    needs_agent = quick.get("risk_level") in ("MEDIUM", "HIGH", "CRITICAL", "UNKNOWN")
+    if needs_agent:
+        return {
+            "decision": "review",
+            "reason": "elevated_quick_risk",
+            "headline": "Safety review in progress",
+            "message": (
+                "SwiftX found unusual activity for this recipient. For your protection, "
+                "we are temporarily holding the transfer while the safety report finishes."
+            ),
+            "details": evidence[:2],
+            "allow_release": False,
+            "needs_agent": True,
         }
 
     return {
@@ -182,7 +298,7 @@ def _policy_check(address: str, chain: str, token: str, amount_usd: float, quick
         "message": "SwiftX completed the check and did not find a reason to slow down this transfer.",
         "details": evidence[:2],
         "allow_release": True,
-        "needs_agent": quick.get("risk_level") in ("MEDIUM", "HIGH", "CRITICAL", "UNKNOWN"),
+        "needs_agent": False,
     }
 
 
@@ -227,7 +343,7 @@ def review(req: ReviewRequest):
     address = req.address.strip()
     token = _normalize_token(req.token)
 
-    # Layer 1: chain detection
+    # Basic asset/address validation
     chain = detect_chain(address)
     if chain == "unknown":
         return JSONResponse(
@@ -244,6 +360,34 @@ def review(req: ReviewRequest):
         return JSONResponse({"error": "USDT is supported as TRC20 in this demo. Use a TRON address that starts with T."}, status_code=400)
     if token not in ("BTC", "TRX", "USDT"):
         return JSONResponse({"error": "Unsupported asset. Supported: BTC, TRX, and USDT-TRC20."}, status_code=400)
+
+    # Layer 1: local reported scam-address database match.
+    database_match = _scam_database_match(address, chain, token)
+    if database_match:
+        quick = _layer1_database_quick(database_match, token)
+        policy = _scam_database_policy(database_match)
+        job_id = str(uuid.uuid4())[:8].upper()
+        _jobs[job_id] = {
+            "status": "pending",
+            "stage": "Queued",
+            "quick": quick,
+            "policy": policy,
+            "result": None,
+            "error": None,
+        }
+        threading.Thread(
+            target=_run_investigation,
+            args=(job_id, address, req.amount_usd, token, chain, quick),
+            daemon=True,
+        ).start()
+        return {
+            "job_id": job_id,
+            "chain": chain.upper(),
+            "asset": token,
+            "quick": quick,
+            "policy": policy,
+            "investigating": True,
+        }
 
     history = _recipient_history(address, chain, token)
     if history and history["count"] >= 3:

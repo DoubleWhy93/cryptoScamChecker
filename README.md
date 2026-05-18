@@ -17,11 +17,12 @@ investigate suspicious addresses in more detail.
 1. The user acts normally inside a mock exchange account and starts an external transfer.
 2. The frontend calls `POST /api/review` before the transfer is released.
 3. The backend detects the chain, currently BTC, TRX, or USDT on TRON/TRC20.
-4. Layer 2 runs a quick behavioral risk score from public address activity.
-5. The exchange UI pauses or allows the transfer based on the quick result.
-6. Medium and higher risk addresses trigger the Layer 3 investigation agent.
-7. The agent follows money-flow clues and returns a warm plain-language report.
-8. The activity panel updates with deeper findings and suggested next steps.
+4. Layer 1 checks a local reported scam-address database.
+5. Layer 2 runs a quick behavioral risk score from public address activity.
+6. The exchange UI pauses or allows the transfer based on the safety result.
+7. Reported matches and medium-or-higher risk addresses trigger the Layer 3 investigation agent.
+8. The agent follows money-flow clues and returns a warm plain-language report.
+9. The activity panel updates with deeper findings and suggested next steps.
 
 The goal is a user-friendly pipeline that can interrupt scam payments at the
 moment they are still preventable.
@@ -42,6 +43,8 @@ pattern looks like a scam.
 Website form
   -> FastAPI /api/review
     -> Chain detection
+    -> Layer 1 reported scam-address database match
+      -> Start Layer 3 agent immediately on reported negative match
     -> Layer 2 quick score
       -> Return immediate user warning
       -> Start Layer 3 agent when risk is elevated
@@ -61,9 +64,11 @@ Website form
 |   |-- styles.css
 |   `-- app.js
 |-- poc/                   # Offline proof-of-concept scripts and experiments
-|-- data/                  # Local research datasets, excluded from deploys
+|-- data/                  # Local labeled-address database used by Layer 1
 |-- docs/
 |   |-- demo-workflow.md
+|   |-- feedback-agents.md
+|   |-- feedback-run-template.md
 |   `-- google-cloud-run.md
 |-- server.py              # FastAPI app, API routes, static file serving
 |-- Dockerfile             # Cloud Run-compatible container
@@ -111,6 +116,20 @@ of the production Cloud Run image.
 pip install -r requirements-poc.txt
 python poc/run_poc.py --n 10
 ```
+
+## Feedback Agents
+
+The repo includes two Codex-only feedback evaluator designs for refining the
+experience:
+
+- Normal customer evaluator: checks that legitimate transfers are not over-blocked.
+- Potential scam victim evaluator: checks that warnings are warm, specific, and persuasive.
+
+Use these as the product iteration loop. The demo workflow is the scenario;
+the feedback agents are how we decide what to change next.
+
+See [docs/feedback-agents.md](docs/feedback-agents.md) and
+[docs/feedback-run-template.md](docs/feedback-run-template.md).
 
 ## Deploy
 

@@ -1,6 +1,7 @@
 .env
 .venv/
 output/
+feedback-artifacts/
 data/btc/
 data/eth/
 __pycache__/

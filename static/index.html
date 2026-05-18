@@ -56,8 +56,11 @@
 
             <div class="amount-row">
               <label class="field amount-field">
-                <span>Amount</span>
-                <input id="amount" type="number" placeholder="0.00" min="0" step="any" />
+                <span id="amount-label">USD amount</span>
+                <span class="money-input">
+                  <span class="currency-prefix">$</span>
+                  <input id="amount" type="number" placeholder="500.00" min="0" step="any" />
+                </span>
               </label>
               <label class="field token-field">
                 <span>Asset</span>
@@ -68,17 +71,28 @@
                 </select>
               </label>
             </div>
+            <p class="field-hint" id="amount-hint">This USD value will be sent as BTC.</p>
 
             <div class="transfer-meta" aria-label="Transfer metadata">
-              <span>Network fee</span>
-              <strong id="network-fee">~0.0001 BTC</strong>
-              <span>Estimated arrival</span>
-              <strong>~10 min</strong>
-              <span>SwiftX protection</span>
-              <strong>Auto-review before release</strong>
+              <div class="meta-row">
+                <span>You send</span>
+                <strong id="send-amount">$0 worth of BTC</strong>
+              </div>
+              <div class="meta-row">
+                <span>Network fee</span>
+                <strong id="network-fee">~0.0001 BTC</strong>
+              </div>
+              <div class="meta-row">
+                <span>Estimated arrival</span>
+                <strong>~10 min</strong>
+              </div>
+              <div class="meta-row">
+                <span>SwiftX protection</span>
+                <strong>Auto-review before release</strong>
+              </div>
             </div>
 
-            <button class="primary-btn" id="review-btn" type="submit">Continue to send</button>
+            <button class="primary-btn" id="review-btn" type="submit">Send</button>
           </form>
 
           <div class="loading-wrap" id="loading" hidden>
@@ -95,7 +109,6 @@
               <p class="panel-kicker">SwiftX transfer protection</p>
               <h2 id="risk-level-text">Awaiting review</h2>
             </div>
-            <span class="score-badge" id="score-badge">--</span>
           </div>
 
           <div class="result-body">
@@ -110,6 +123,9 @@
               <button class="secondary-btn" id="cancel-btn" type="button">Cancel transfer</button>
               <button class="confirm-btn" id="confirm-btn" type="button">Release transfer</button>
             </div>
+            <p class="override-note" id="override-note" hidden>
+              SwiftX cannot verify this recipient is safe. If you continue, the transfer may not be recoverable.
+            </p>
           </div>
         </section>
 
@@ -125,52 +141,30 @@
       </div>
 
       <aside class="exchange-rail" aria-label="Account side panel">
-        <section class="rail-card">
-          <p class="panel-kicker">Available assets</p>
-          <div class="asset-row">
-            <span>Bitcoin</span>
-            <strong>0.7421 BTC</strong>
-          </div>
-          <div class="asset-row">
-            <span>Tether</span>
-            <strong>18,500 USDT</strong>
-          </div>
-          <div class="asset-row">
-            <span>Tron</span>
-            <strong>22,140 TRX</strong>
-          </div>
-        </section>
-
         <section class="rail-card demo-card">
           <p class="panel-kicker">Demo recipients</p>
           <div class="presets" aria-label="Demo addresses">
             <button class="preset-btn" type="button" data-preset="0">
               <span>Saved recipient</span>
-              <small>3LQUu4...FW6a - 250 BTC</small>
+              <small>3LQUu4...FW6a - $250 of BTC</small>
             </button>
             <button class="preset-btn" type="button" data-preset="1">
               <span>BTC risky wallet</span>
-              <small>0.5 BTC</small>
+              <small>$500 of BTC</small>
             </button>
             <button class="preset-btn" type="button" data-preset="2">
-              <span>TRX scam demo</span>
-              <small>TApEYDG...aD3 - 15,000 USDT</small>
+              <span>Database match test</span>
+              <small>TNphXJ...EueW - $31,956.90 of USDT</small>
             </button>
             <button class="preset-btn" type="button" data-preset="3">
-              <span>TRX fund router</span>
-              <small>5,000 TRX</small>
+              <span>Reported USDT wallet</span>
+              <small>TJSoTJ...q6rC - $28,760 of USDT</small>
+            </button>
+            <button class="preset-btn" type="button" data-preset="4">
+              <span>USDT accumulation wallet</span>
+              <small>TGKtVC...ByDt - $38,795 of USDT</small>
             </button>
           </div>
-        </section>
-
-        <section class="rail-card protection-card" id="signals">
-          <p class="panel-kicker">Protection rules</p>
-          <ul class="compact-list">
-            <li>Unusual address age or transfer history</li>
-            <li>Rapid movement of received funds</li>
-            <li>USDT transfers on TRON/TRC20</li>
-            <li>Patterns linked to scam cash-out behavior</li>
-          </ul>
         </section>
       </aside>
     </section>

@@ -5,7 +5,9 @@
 __pycache__
 *.pyc
 *.pyo
-data/
+data/*
+!data/testing_labeled_addresses_2026-05-17.csv
 output/
+outputs/
 poc/
 *.md

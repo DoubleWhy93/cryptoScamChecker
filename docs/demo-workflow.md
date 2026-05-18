@@ -44,6 +44,7 @@ The quick screen looks at public address behavior:
 
 - whether the chain can be detected
 - whether the selected asset matches the address type
+- whether the address appears in a local reported scam-address database
 - whether this customer has frequently sent to the same recipient before
 - how many transactions the address has
 - whether the address is new or short-lived
@@ -55,9 +56,10 @@ The demo supports BTC, native TRX, and USDT on TRON/TRC20.
 
 Basic policy filters run before the agent:
 
+- reported scam-address database match: start the deeper agent review immediately
 - frequent saved recipient + clean/low public risk: pass with light friction
 - brand-new/no-history recipient: warn and recommend verifying ownership or a small test amount
-- very fresh recipient: warn with address-age context
+- very fresh recipient: warn directly with address-age context and recommend verification or a small test amount
 - large first-time recipient: warn and ask the user to verify through a trusted channel
 - medium/high/unknown risk: start the deeper agent review in the background
 

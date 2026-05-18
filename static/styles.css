@@ -172,8 +172,7 @@ button {
   text-align: right;
 }
 
-.portfolio-value span,
-.asset-row span {
+.portfolio-value span {
   color: var(--muted);
   font: 800 12px/1.2 Arial, sans-serif;
   text-transform: uppercase;
@@ -190,33 +189,6 @@ button {
   border-radius: 8px;
   background: var(--panel-strong);
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-}
-
-.asset-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.asset-row:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
-}
-
-.asset-row strong {
-  color: var(--ink);
-  font: 800 14px/1.2 Arial, sans-serif;
-}
-
-.compact-list {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-  padding-left: 18px;
-  color: var(--muted);
-  font: 14px/1.4 Arial, sans-serif;
 }
 
 .intro {
@@ -294,8 +266,7 @@ h1 {
   line-height: 1.05;
 }
 
-.chain-chip,
-.score-badge {
+.chain-chip {
   flex: 0 0 auto;
   padding: 8px 10px;
   border: 1px solid var(--line);
@@ -349,7 +320,7 @@ h1 {
   gap: 8px;
 }
 
-.field span {
+.field > span:first-child {
   color: var(--muted);
   font: 800 12px/1.2 Arial, sans-serif;
   text-transform: uppercase;
@@ -358,7 +329,7 @@ h1 {
 .field input,
 .field select {
   width: 100%;
-  min-height: 50px;
+  height: 54px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-strong);
@@ -368,10 +339,49 @@ h1 {
   outline: none;
 }
 
+.field input {
+  min-width: 0;
+}
+
 .field input:focus,
 .field select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(204, 75, 36, 0.16);
+}
+
+.money-input {
+  position: relative;
+  display: block;
+}
+
+.money-input input {
+  padding-left: 34px;
+}
+
+.money-input input::-webkit-outer-spin-button,
+.money-input input::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.money-input input[type="number"] {
+  appearance: textfield;
+}
+
+.currency-prefix {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  z-index: 1;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font: 800 16px/1 Arial, sans-serif;
+}
+
+.field-hint {
+  margin: -8px 0 2px;
+  color: var(--muted);
+  font: 700 12px/1.35 Arial, sans-serif;
 }
 
 .amount-row {
@@ -382,17 +392,32 @@ h1 {
 
 .transfer-meta {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px 14px;
-  padding: 14px;
-  background: #eef1f5;
+  gap: 0;
+  padding: 4px 16px;
+  background: #ffffff;
+  border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--muted);
   font: 13px/1.3 Arial, sans-serif;
 }
 
-.transfer-meta strong {
+.meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 34px;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.meta-row:last-child {
+  border-bottom: 0;
+}
+
+.meta-row strong {
   color: var(--ink);
+  text-align: right;
+  font-weight: 800;
 }
 
 .primary-btn,
@@ -438,6 +463,21 @@ h1 {
 
 .confirm-btn.danger {
   background: var(--red);
+}
+
+.confirm-btn.override {
+  border: 1px solid rgba(197, 49, 45, 0.38);
+  background: transparent;
+  color: var(--red);
+}
+
+.confirm-btn.override:hover {
+  background: rgba(197, 49, 45, 0.08);
+}
+
+.secondary-btn.safe-primary {
+  background: var(--green);
+  color: white;
 }
 
 .loading-wrap,
@@ -589,6 +629,20 @@ h1 {
 
 .result-actions .confirm-btn {
   flex: 2;
+}
+
+.result-actions .safe-primary {
+  flex: 2;
+}
+
+.result-actions .confirm-btn.override {
+  flex: 1;
+}
+
+.override-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font: 700 13px/1.45 Arial, sans-serif;
 }
 
 .activity-list {

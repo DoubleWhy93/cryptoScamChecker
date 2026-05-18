@@ -62,11 +62,21 @@ def detect_chain(address: str) -> str:
 
 def _http_get(url: str, headers: dict | None = None) -> dict | list | None:
     try:
-        r = requests.get(url, headers=headers or {}, timeout=12)
+        request_headers = headers or {}
+        r = requests.get(url, headers=request_headers, timeout=12)
+        if (
+            r.status_code in (401, 403, 429)
+            and request_headers.get("TRON-PRO-API-KEY")
+            and "tronscan" in url
+        ):
+            r = requests.get(url, timeout=12)
         if r.status_code == 404:
             return None
         r.raise_for_status()
-        return r.json()
+        payload = r.json()
+        if isinstance(payload, dict) and payload.get("Error"):
+            return {"error": payload["Error"]}
+        return payload
     except Exception:
         return None
 
@@ -74,6 +84,23 @@ def _http_get(url: str, headers: dict | None = None) -> dict | list | None:
 def _tronscan_headers() -> dict:
     key = os.getenv("TRONSCAN_API_KEY", "")
     return {"TRON-PRO-API-KEY": key} if key else {}
+
+
+def _fetch_trc20_balance(address: str, contract: str) -> float | None:
+    data = _http_get(f"{TRONSCAN_BASE}/account?address={address}", _tronscan_headers())
+    if not isinstance(data, dict) or data.get("error"):
+        return None
+
+    for token in data.get("trc20token_balances", []):
+        if token.get("tokenId") != contract:
+            continue
+        try:
+            raw_balance = float(token.get("balance") or 0)
+            decimals = int(token.get("tokenDecimal") or 6)
+            return round(raw_balance / (10 ** decimals), 6)
+        except (TypeError, ValueError):
+            return None
+    return 0.0
 
 
 # ── Chain-specific fetchers (the ONLY chain-specific code) ────────────────────
@@ -103,11 +130,15 @@ def _fetch_account(address: str, chain: str, token: str | None = None) -> dict:
             f"?address={address}&trc20Id={TRON_USDT_CONTRACT}&start=0&limit=50"
             f"&direction=0&reverse=true&db_version=1",
             _tronscan_headers(),
-        ) or {}
+        )
+        if not isinstance(tx_data, dict):
+            return {"error": "tronscan_unavailable"}
+        if tx_data.get("error"):
+            return {"error": tx_data["error"]}
         transfers = tx_data.get("data", []) if isinstance(tx_data, dict) else []
         return {
             "tx_count": tx_data.get("total", tx_data.get("rangeTotal", len(transfers))) if isinstance(tx_data, dict) else len(transfers),
-            "balance": None,
+            "balance": _fetch_trc20_balance(address, TRON_USDT_CONTRACT),
             "unit":     "USDT",
         }
 
@@ -172,6 +203,10 @@ def _fetch_txs(address: str, chain: str, token: str | None = None) -> list[dict]
             f"&direction=0&reverse=true&db_version=1",
             _tronscan_headers(),
         )
+        if not isinstance(data, dict):
+            return None
+        if data.get("error"):
+            return None
         raw = data.get("data", []) if isinstance(data, dict) else []
         txs = []
         for tx in raw:
@@ -212,11 +247,19 @@ def _get_address_summary(address: str, chain: str, token: str | None = None) -> 
         return account
 
     txs  = _fetch_txs(address, chain, token)
+    if txs is None:
+        return {"error": "transfer_history_unavailable"}
     unit = account["unit"]
 
     total_in   = sum(t["amount"] for t in txs if t["to"]   == address)
     total_out  = sum(t["amount"] for t in txs if t["from"] == address)
     relay_ratio = total_out / total_in if total_in > 0 else 0.0
+    balance_amount = account.get("balance")
+    retained_ratio = (
+        balance_amount / total_in
+        if isinstance(balance_amount, (int, float)) and total_in > 0
+        else None
+    )
 
     senders    = {t["from"] for t in txs if t["to"]   == address}
     recipients = {t["to"]   for t in txs if t["from"] == address}
@@ -232,9 +275,13 @@ def _get_address_summary(address: str, chain: str, token: str | None = None) -> 
         "asset":                unit,
         "tx_count":             account["tx_count"],
         "balance":              f"{account['balance']} {unit}" if account.get("balance") is not None else None,
+        "balance_amount":       balance_amount,
         "total_in":             f"{round(total_in, 8)} {unit}",
+        "total_in_amount":      round(total_in, 8),
         "total_out":            f"{round(total_out, 8)} {unit}",
+        "total_out_amount":     round(total_out, 8),
         "relay_ratio":          round(relay_ratio, 4),
+        "retained_ratio":       round(retained_ratio, 6) if retained_ratio is not None else None,
         "n_senders_seen":       len(senders),
         "n_recipients_seen":    len(recipients),
         "first_seen_days_ago":  first_seen_days_ago,
@@ -244,7 +291,7 @@ def _get_address_summary(address: str, chain: str, token: str | None = None) -> 
 
 
 def _get_outflows(address: str, chain: str, token: str | None = None) -> dict:
-    txs = _fetch_txs(address, chain, token)
+    txs = _fetch_txs(address, chain, token) or []
     unit = _fetch_account(address, chain, token).get("unit", "")
 
     totals: dict[str, float] = {}
@@ -262,7 +309,7 @@ def _get_outflows(address: str, chain: str, token: str | None = None) -> dict:
 
 
 def _get_inflows(address: str, chain: str, token: str | None = None) -> dict:
-    txs = _fetch_txs(address, chain, token)
+    txs = _fetch_txs(address, chain, token) or []
     unit = _fetch_account(address, chain, token).get("unit", "")
 
     totals: dict[str, float] = {}
@@ -303,18 +350,32 @@ def _score_address(address: str, chain: str, token: str | None = None) -> dict:
 
     points   = 0
     evidence = []
+    low_retained_high_volume = (
+        s.get("retained_ratio") is not None
+        and s["retained_ratio"] < 0.02
+        and s.get("total_in_amount", 0) >= 1000
+    )
+    bursty_low_retained_high_volume = (
+        low_retained_high_volume
+        and s.get("burst_days") is not None
+        and s["burst_days"] <= 30
+    )
 
     if 0 < s["tx_count"] < 5:
         points += 40; evidence.append("[+40] Near-fresh address: fewer than 5 transactions")
     if s["relay_ratio"] > 0.9 and s["tx_count"] > 0:
         points += 30; evidence.append("[+30] High relay ratio: 90%+ forwarded out")
+    if bursty_low_retained_high_volume:
+        points += 25; evidence.append("[+25] Burst high-volume activity with almost no funds retained")
+    elif low_retained_high_volume:
+        points += 15; evidence.append("[+15] Low remaining balance after high received volume")
     if s["n_senders_seen"] >= 2 and s["n_recipients_seen"] <= 2:
         points += 25; evidence.append("[+25] Funnel pattern: many senders to few recipients")
     if s["burst_days"] is not None and s["burst_days"] <= 14:
         points += 15; evidence.append("[+15] Short burst lifecycle: all activity within 14 days")
     if s["burst_days"] is not None and s["burst_days"] > 365:
         points -= 20; evidence.append("[-20] Established wallet: active for over a year")
-    if s["n_recipients_seen"] > 10:
+    if s["n_recipients_seen"] > 10 and not low_retained_high_volume:
         points -= 15; evidence.append("[-15] Many recipients: normal spending behaviour")
 
     points = max(0, min(100, points))
@@ -328,6 +389,12 @@ def _score_address(address: str, chain: str, token: str | None = None) -> dict:
         "evidence":    evidence,
         "tx_count":    s["tx_count"],
         "relay_ratio": s["relay_ratio"],
+        "first_seen_days_ago": s.get("first_seen_days_ago"),
+        "balance":     s.get("balance"),
+        "balance_amount": s.get("balance_amount"),
+        "total_in_amount": s.get("total_in_amount"),
+        "total_out_amount": s.get("total_out_amount"),
+        "retained_ratio": s.get("retained_ratio"),
     }
 
 

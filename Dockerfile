@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY agent/   ./agent/
 COPY core/    ./core/
 COPY static/  ./static/
+COPY data/testing_labeled_addresses_2026-05-17.csv ./data/testing_labeled_addresses_2026-05-17.csv
 COPY server.py .
 
 # Cloud Run injects PORT; default to 8080 for local container runs.

@@ -19,7 +19,7 @@ const riskMeta = {
   },
   CRITICAL: {
     cls: "critical",
-    label: "Transfer blocked by protection",
+    label: "Strong safety warning",
     confirmText: "Wait for review",
     confirmCls: "danger",
   },
@@ -39,9 +39,10 @@ const riskMeta = {
 
 const presets = [
   { address: "3LQUu4v9z6KNch71j7kbj8GPeAGUo1FW6a", amount: "250", token: "BTC" },
-  { address: "1GH9bkaD3QsZyFU1MRcvpmQLj4SiVpARit", amount: "0.5", token: "BTC" },
-  { address: "TApEYDGz8eH9JywtaTWkTwczwPJH368aD3", amount: "15000", token: "USDT" },
-  { address: "TDNxWTrZWXYBHpHkRH9qV6sbE1nx888888", amount: "5000", token: "TRX" },
+  { address: "1GH9bkaD3QsZyFU1MRcvpmQLj4SiVpARit", amount: "500", token: "BTC" },
+  { address: "TNphXJ5kYMQyTW6TKD8PmyfEHh8mfuEueW", amount: "31956.90", token: "USDT" },
+  { address: "TJSoTJ5V8EMnc189ytobnU3QSUyePFq6rC", amount: "28760", token: "USDT" },
+  { address: "TGKtVC84jXjXSHbafKSVepntNRebQoByDt", amount: "38795", token: "USDT" },
 ];
 
 const displayStages = [
@@ -67,6 +68,16 @@ function setText(id, text) {
   $(id).textContent = text;
 }
 
+function formatUsd(value) {
+  const amount = parseFloat(value);
+  if (!Number.isFinite(amount) || amount <= 0) return "$0";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: amount % 1 === 0 ? 0 : 2,
+  }).format(amount);
+}
+
 function detectChainLabel(address) {
   const token = $("token")?.value;
   if (address.startsWith("bc1") || address.startsWith("1") || address.startsWith("3")) return "BTC";
@@ -77,6 +88,9 @@ function detectChainLabel(address) {
 
 function updateTokenMeta() {
   const token = $("token").value;
+  const amount = $("amount").value || "0";
+  setText("amount-hint", `This USD value will be sent as ${token}${token === "USDT" ? " on TRON (TRC20)" : ""}.`);
+  setText("send-amount", `${formatUsd(amount)} worth of ${token}`);
   setText("network-fee", token === "BTC" ? "~0.0001 BTC" : "~3 TRX network fee");
   setText("chain-chip", detectChainLabel($("address").value.trim()));
 }
@@ -87,6 +101,8 @@ function resetResult() {
   setHidden($("error-banner"), true);
   setHidden($("loading"), true);
   setHidden($("review-btn"), false);
+  setHidden($("override-note"), true);
+  $("cancel-btn").className = "secondary-btn";
   pendingJobId = null;
   pendingInvestigating = false;
   pendingQuick = null;
@@ -181,22 +197,20 @@ function showQuickResult(quick, investigating, policy) {
   const level = quick.risk_level || "UNKNOWN";
   const meta = riskMeta[level] || riskMeta.UNKNOWN;
   const header = $("result-header");
-  const score = Number.isFinite(quick.score) ? quick.score : "--";
-
-  const visualClass = policy?.decision === "warn" && !investigating ? "medium" : meta.cls;
-  header.className = `result-header ${visualClass}`;
-  setText("risk-level-text", policy?.headline || meta.label);
-  setText("score-badge", `${score}/100`);
-
   const facts = [];
   if (quick.tx_count != null) facts.push(`${quick.tx_count} transactions`);
   if (quick.first_seen_days_ago != null) facts.push(`first seen ${Math.round(quick.first_seen_days_ago)} days ago`);
   if (quick.balance) facts.push(`balance ${quick.balance}`);
   if (quick.asset) facts.push(`asset ${quick.asset}`);
-  setText(
-    "user-message",
-    policy?.message || buildQuickMessage(level, investigating, facts)
-  );
+  const effectiveHeadline = policy?.headline || (investigating ? "Safety review in progress" : meta.label);
+  const effectiveMessage = policy?.message || buildQuickMessage(level, investigating, facts);
+  const effectiveClass = meta.cls;
+
+  const visualClass = policy?.decision === "warn" && !investigating ? "medium" : effectiveClass;
+  header.className = `result-header ${visualClass}`;
+  setText("risk-level-text", effectiveHeadline);
+
+  setText("user-message", effectiveMessage);
 
   const detailItems = policy?.details?.length ? policy.details : quick.evidence || [];
   renderList($("evidence-list"), detailItems);
@@ -207,6 +221,8 @@ function showQuickResult(quick, investigating, policy) {
   confirmButton.textContent = meta.confirmText;
   confirmButton.className = `confirm-btn ${meta.confirmCls}`.trim();
   confirmButton.disabled = investigating || policy?.allow_release === false;
+  $("cancel-btn").className = "secondary-btn";
+  setHidden($("override-note"), true);
 
   setHidden($("result-panel"), false);
 }
@@ -277,7 +293,7 @@ function addActivityCard(jobId, address, amount, token, investigating, quick) {
   const right = document.createElement("div");
   const amountEl = document.createElement("div");
   amountEl.className = "tx-amount";
-  amountEl.textContent = `${amount} ${token}`;
+  amountEl.textContent = `${formatUsd(amount)} of ${token}`;
   const timeEl = document.createElement("div");
   timeEl.className = "tx-time";
   timeEl.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -413,16 +429,23 @@ function enableFinalDecision(jobId, level) {
 
   const meta = riskMeta[level] || riskMeta.UNKNOWN;
   const confirmButton = $("confirm-btn");
+  const cancelButton = $("cancel-btn");
+  const isHighRisk = level === "HIGH" || level === "CRITICAL";
+  const isUnverified = isHighRisk || level === "UNKNOWN";
   confirmButton.disabled = false;
-  confirmButton.textContent = level === "HIGH" || level === "CRITICAL"
-    ? "Override warning"
+  confirmButton.textContent = isUnverified
+    ? "Continue anyway"
     : meta.confirmText.replace("Wait for review", "Release transfer");
-  confirmButton.className = `confirm-btn ${meta.confirmCls}`.trim();
+  confirmButton.className = isUnverified
+    ? "confirm-btn override"
+    : `confirm-btn ${meta.confirmCls}`.trim();
+  cancelButton.className = isUnverified ? "secondary-btn safe-primary" : "secondary-btn";
+  setHidden($("override-note"), !isUnverified);
 
   setText(
     "risk-level-text",
-    level === "HIGH" || level === "CRITICAL"
-      ? "Agent recommends canceling"
+    isHighRisk
+      ? "Safety report recommends canceling"
       : meta.label
   );
 }
@@ -451,5 +474,6 @@ $("send-form").addEventListener("submit", reviewTransfer);
 $("cancel-btn").addEventListener("click", resetForm);
 $("confirm-btn").addEventListener("click", confirmTransfer);
 $("token").addEventListener("change", updateTokenMeta);
+$("amount").addEventListener("input", updateTokenMeta);
 $("address").addEventListener("input", (event) => setText("chain-chip", detectChainLabel(event.target.value.trim())));
 updateTokenMeta();
